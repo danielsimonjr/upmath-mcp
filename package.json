@@ -1,7 +1,7 @@
 {
   "name": "upmath-mcp",
-  "version": "1.0.0",
-  "description": "UpMath MCP server - LaTeX rendering via i.upmath.me for Claude Code",
+  "version": "2.0.0",
+  "description": "UpMath MCP server - LaTeX rendering, document intelligence, diagram templates, and interactive exploration via i.upmath.me",
   "main": "server.js",
   "type": "module",
   "bin": {
