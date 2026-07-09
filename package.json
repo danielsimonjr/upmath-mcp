@@ -8,7 +8,8 @@
     "upmath-mcp": "./server.js"
   },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "bundle": "node scripts/bundle.mjs"
   },
   "keywords": ["mcp", "upmath", "latex", "tikz", "svg", "claude-code", "math-rendering"],
   "author": "Daniel Simon Jr. <Daniel@danielsimonjr.com>",
@@ -16,5 +17,8 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
   }
 }

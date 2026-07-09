@@ -2,16 +2,43 @@
 
 MCP server that gives Claude Code direct access to LaTeX rendering via the [UpMath API](https://upmath.me/). Renders equations, TikZ diagrams, and full documents to SVG/PNG without a local TeX installation.
 
-## Tools
+## Tools (16)
+
+**Single render / embed**
 
 | Tool | Description |
 |------|-------------|
-| `render_equation` | Render LaTeX equation to SVG or PNG |
-| `render_tikz` | Render TikZ/pgfplots/circuitikz diagram to SVG or PNG |
-| `render_batch` | Render multiple equations at once, saving to files |
-| `render_markdown_with_math` | Render markdown with `$$...$$` math to HTML with embedded SVGs |
-| `check_syntax` | Validate LaTeX syntax without saving |
-| `get_render_url` | Get the UpMath URL for embedding in HTML/markdown |
+| `render_equation` | Render a LaTeX equation to SVG or PNG (optionally save to file) |
+| `render_tikz` | Render a TikZ/pgfplots/circuitikz/tikz-3dplot diagram to SVG or PNG |
+| `get_render_url` | Get the UpMath image URL for a LaTeX expression (embed, no file) |
+| `check_syntax` | Validate a LaTeX snippet by attempting to render it |
+
+**Documents / papers**
+
+| Tool | Description |
+|------|-------------|
+| `render_paper` | Render a full markdown paper (`$$...$$` math, headings, tables, code) to publication-ready HTML. `useUpmath:false` (default) uses KaTeX; `useUpmath:true` renders all math via the UpMath SVG API |
+| `render_markdown_with_math` | Render markdown with `$$...$$` math to HTML with embedded UpMath SVGs |
+| `scan_document_math` | Inventory every equation in a markdown file |
+| `validate_equations` | Validate all equations in a document, reporting failures |
+
+**Batch / iteration**
+
+| Tool | Description |
+|------|-------------|
+| `render_batch` | Render multiple equations at once, saving each to a file |
+| `render_batch_cached` | Batch render with caching — skips unchanged equations |
+| `render_equation_sheet` | Render named equations into one reference-sheet HTML page |
+| `render_parameter_grid` | Render a LaTeX template across a grid of parameter values |
+| `render_diff` | Render two versions of an equation side by side for comparison |
+
+**Diagrams / notation**
+
+| Tool | Description |
+|------|-------------|
+| `list_diagram_templates` | List the built-in TikZ diagram templates |
+| `render_diagram_template` | Render a named TikZ template |
+| `build_notation_table` | Build a symbol/notation table from a document |
 
 ## Supported Packages
 
