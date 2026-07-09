@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "upmath-mcp": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bundle/index.mjs"
+      ],
+      "env": {
+        "_BUILD": "2026-07-09-plugin-init"
+      }
+    }
+  }
+}
