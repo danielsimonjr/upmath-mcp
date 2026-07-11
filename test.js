@@ -1,13 +1,41 @@
 #!/usr/bin/env node
 /**
- * Test script for upmath-mcp v2 tools
+ * Smoke test for upmath-mcp.
+ *
+ * Portable and network-free by default: exercises the MCP handshake,
+ * tools/list, and every tool that works without calling the UpMath API
+ * (document scanning, notation tables, templates, URL building), using
+ * a temp-dir fixture. Set UPMATH_TEST_NETWORK=1 to also exercise a live
+ * render_equation call against the API.
+ *
+ * Exits 0 on success, 1 on any failure — safe to run in CI via `npm test`.
  */
 import { spawn } from "child_process";
 import { createInterface } from "readline";
+import fs from "fs";
+import os from "os";
+import path from "path";
 
-const server = spawn("node", ["server.js"], {
+const EXPECTED_TOOL_COUNT = 16;
+
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "upmath-mcp-test-"));
+const fixture = path.join(tmpDir, "fixture.md");
+fs.writeFileSync(fixture, `# Test Paper
+
+## Dynamics
+
+The free energy $$F_l$$ evolves as:
+
+$$
+\\frac{d\\mu}{dt} = -\\nabla_\\mu F(\\mu, \\pi)
+$$
+
+With prediction error $$\\varepsilon_l = y_l - g_l(\\mu_l)$$ at each level.
+`, "utf-8");
+
+const server = spawn(process.execPath, ["server.js"], {
   cwd: import.meta.dirname,
-  stdio: ["pipe", "pipe", "pipe"],
+  stdio: ["pipe", "pipe", "inherit"],
 });
 
 const rl = createInterface({ input: server.stdout });
@@ -24,97 +52,87 @@ rl.on("line", (line) => {
   } catch {}
 });
 
-function call(method, params = {}) {
-  return new Promise((resolve) => {
+function call(method, params = {}, timeoutMs = 60000) {
+  return new Promise((resolve, reject) => {
     const id = ++reqId;
-    pending.set(id, resolve);
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error("Timed out waiting for " + method));
+    }, timeoutMs);
+    pending.set(id, (msg) => {
+      clearTimeout(timer);
+      resolve(msg);
+    });
     server.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
   });
 }
 
+let failures = 0;
+
+function check(name, condition, detail) {
+  if (condition) {
+    console.log("  ok: " + name);
+  } else {
+    failures++;
+    console.error("  FAIL: " + name + (detail ? " — " + detail : ""));
+  }
+}
+
+async function callTool(name, args) {
+  const res = await call("tools/call", { name, arguments: args });
+  return res.result?.content?.[0];
+}
+
 async function run() {
-  // Initialize
-  const init = await call("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "1.0" } });
-  console.log("Initialized:", init.result?.serverInfo?.name, init.result?.serverInfo?.version);
+  const init = await call("initialize", {
+    protocolVersion: "2024-11-05",
+    capabilities: {},
+    clientInfo: { name: "smoke-test", version: "1.0" },
+  });
+  check("initialize", init.result?.serverInfo?.name === "upmath-mcp", JSON.stringify(init.error || init.result));
 
-  // List tools
   const tools = await call("tools/list");
-  console.log("\nTools:", tools.result?.tools?.length);
+  const toolCount = tools.result?.tools?.length;
+  check("tools/list returns " + EXPECTED_TOOL_COUNT + " tools", toolCount === EXPECTED_TOOL_COUNT, "got " + toolCount);
 
-  // Test 1: scan_document_math
-  console.log("\n--- Test: scan_document_math ---");
-  const scan = await call("tools/call", {
-    name: "scan_document_math",
-    arguments: {
-      inputFile: "C:/Users/danie/Dropbox/Misc/Philosophy/Beyond the Bat/Beyond the Bat (Complete).md",
-    },
-  });
-  console.log(scan.result?.content?.[0]?.text?.slice(0, 500));
+  const scan = await callTool("scan_document_math", { inputFile: fixture });
+  check("scan_document_math finds equations", scan?.text?.includes("Total equations: 3"), scan?.text?.slice(0, 200));
 
-  // Test 2: build_notation_table
-  console.log("\n--- Test: build_notation_table ---");
-  const notation = await call("tools/call", {
-    name: "build_notation_table",
-    arguments: {
-      inputFile: "C:/Users/danie/Dropbox/Misc/Philosophy/Beyond the Bat/Appendix E — Unified Mathematical Framework.md",
-      format: "markdown",
-    },
-  });
-  console.log(notation.result?.content?.[0]?.text?.slice(0, 500));
+  const notation = await callTool("build_notation_table", { inputFile: fixture, format: "markdown" });
+  check("build_notation_table extracts symbols", notation?.text?.includes("\\mu") && notation?.text?.includes("| Symbol |"), notation?.text?.slice(0, 200));
 
-  // Test 3: render_diff
-  console.log("\n--- Test: render_diff ---");
-  const diff = await call("tools/call", {
-    name: "render_diff",
-    arguments: {
-      before: "F = \\sum_l F_l",
-      after: "\\mathcal{J} = \\sum_{l=1}^{3} F_l + \\lambda \\mathcal{T}",
-      label: "Free Energy vs Unified Functional",
-      saveTo: "C:/Users/danie/Dropbox/Misc/Philosophy/Beyond the Bat/_test_diff.html",
-    },
-  });
-  console.log(diff.result?.content?.[0]?.text);
+  const templates = await callTool("list_diagram_templates", {});
+  check("list_diagram_templates lists templates", templates?.text?.includes("control-system") && templates?.text?.includes("neural-network"), templates?.text?.slice(0, 200));
 
-  // Test 4: render_parameter_grid
-  console.log("\n--- Test: render_parameter_grid ---");
-  const grid = await call("tools/call", {
-    name: "render_parameter_grid",
-    arguments: {
-      latexTemplate: "\\frac{1}{1 + {TAU} s}",
-      paramName: "TAU",
-      values: ["0.1", "0.5", "1", "5"],
-      saveTo: "C:/Users/danie/Dropbox/Misc/Philosophy/Beyond the Bat/_test_grid.html",
-    },
-  });
-  console.log(grid.result?.content?.[0]?.text);
+  const url = await callTool("get_render_url", { latex: "E = mc^2", format: "svg" });
+  check("get_render_url builds URL", url?.text?.includes("/svg/E%20%3D%20mc%5E2"), url?.text);
 
-  // Test 5: render_equation_sheet
-  console.log("\n--- Test: render_equation_sheet ---");
-  const sheet = await call("tools/call", {
-    name: "render_equation_sheet",
-    arguments: {
-      title: "RSP Core Equations",
-      equations: [
-        { name: "Free Energy", latex: "F_l = D_{KL}[q(\\mu_l) \\| p(\\mu_l | \\mu_{l+1})] - \\ln p(y_l | \\mu_l)", description: "Level-specific free energy" },
-        { name: "Prediction Error", latex: "\\varepsilon_l = y_l - g_l(\\mu_l)", description: "Sensory prediction error at level l" },
-        { name: "Master Functional", latex: "\\mathcal{J}[\\mu, \\pi, a] = \\sum_{l=1}^{3} F_l(\\mu_l, \\pi_l) + \\lambda \\mathcal{T}(\\mu, \\pi)", description: "Unified variational functional" },
-      ],
-      saveTo: "C:/Users/danie/Dropbox/Misc/Philosophy/Beyond the Bat/_test_sheet.html",
-    },
-  });
-  console.log(sheet.result?.content?.[0]?.text);
+  const missing = await callTool("scan_document_math", { inputFile: path.join(tmpDir, "does-not-exist.md") });
+  check("missing file reports cleanly", missing?.text?.startsWith("File not found"), missing?.text);
 
-  // Test 6: list_diagram_templates
-  console.log("\n--- Test: list_diagram_templates ---");
-  const templates = await call("tools/call", { name: "list_diagram_templates", arguments: {} });
-  console.log(templates.result?.content?.[0]?.text);
+  const badTemplate = await callTool("render_diagram_template", { template: "nope" });
+  check("unknown template reports cleanly", badTemplate?.text?.startsWith("Unknown template"), badTemplate?.text);
 
-  console.log("\n✓ All tests complete");
+  if (process.env.UPMATH_TEST_NETWORK === "1") {
+    const render = await callTool("render_equation", { latex: "E = mc^2", format: "svg" });
+    check("render_equation (network)", render?.text?.includes("<svg"), render?.text?.slice(0, 200));
+  } else {
+    console.log("  skip: live API test (set UPMATH_TEST_NETWORK=1 to enable)");
+  }
+
   server.kill();
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+
+  if (failures > 0) {
+    console.error("\n" + failures + " check(s) failed");
+    process.exit(1);
+  }
+  console.log("\nAll checks passed");
 }
 
 run().catch((err) => {
   console.error("Test error:", err);
   server.kill();
+  fs.rmSync(tmpDir, { recursive: true, force: true });
   process.exit(1);
 });

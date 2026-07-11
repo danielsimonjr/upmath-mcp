@@ -1,0 +1,14 @@
+{
+  "name": "upmath",
+  "owner": {
+    "name": "Daniel Simon Jr.",
+    "email": "Daniel@danielsimonjr.com"
+  },
+  "plugins": [
+    {
+      "name": "upmath-mcp",
+      "source": "./",
+      "description": "LaTeX / TikZ / markdown-math rendering to SVG, PNG, and HTML via i.upmath.me (no local TeX install) + upmath skill."
+    }
+  ]
+}

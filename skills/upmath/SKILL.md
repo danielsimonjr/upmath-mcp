@@ -63,7 +63,7 @@ This replaces the old **manual** step (paste `Complete.md` into upmath.me → sa
 
 ## Gotchas
 
-- **Third-party API.** i.upmath.me is Roman Parpalak's public service — mind rate limits and availability. A whole paper is many equations; use `render_batch_cached`, add small delays if throttled, or **self-host**: `docker run -t -p 8080:80 ghcr.io/parpalak/i.upmath.me:master`, then set `UPMATH_URL=http://localhost:8080` (the server reads it; default `https://i.upmath.me`).
+- **Third-party API.** i.upmath.me is Roman Parpalak's public service — mind availability. The server now handles rate limits itself: automatic retry with exponential backoff on 429/5xx, a politeness throttle between requests (`UPMATH_MIN_INTERVAL_MS`, default 100ms), and a session-wide render cache (identical LaTeX is fetched once — re-running a paper only re-renders changed equations). For heavy use, **self-host**: `docker run -t -p 8080:80 ghcr.io/parpalak/i.upmath.me:master`, then set `UPMATH_URL=http://localhost:8080` (default `https://i.upmath.me`).
 - **TikZ needs its packages.** Circuits/plots/proofs fail without the right `packages` array. `check_syntax` / `validate_equations` first for anything non-trivial.
 - **Pass raw LaTeX** — URL-encoding is handled server-side.
 - **SVG for print/web** (crisp, small); PNG only when a consumer can't take SVG.

@@ -54,6 +54,19 @@ Everything TeX Live supports, including:
 
 ## Setup
 
+### As a Claude Code plugin (recommended)
+
+The repo is its own plugin marketplace. In Claude Code:
+
+```
+/plugin marketplace add danielsimonjr/upmath-mcp
+/plugin install upmath-mcp@upmath
+```
+
+This loads the bundled server (no `npm install` needed) plus the companion `upmath` skill.
+
+### As a plain MCP server
+
 ```bash
 git clone https://github.com/danielsimonjr/upmath-mcp.git
 cd upmath-mcp
@@ -74,6 +87,57 @@ Add to `~/.claude/.mcp.json`:
 ```
 
 Restart Claude Code. The rendering tools will be available.
+
+## Configuration
+
+All settings are environment variables (set them in the `env` block of your MCP config):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `UPMATH_URL` | `https://i.upmath.me` | Renderer base URL (point at a self-hosted instance) |
+| `UPMATH_TIMEOUT_MS` | `30000` | Per-request timeout |
+| `UPMATH_RETRIES` | `3` | Retries on 429/5xx/network errors (exponential backoff) |
+| `UPMATH_RETRY_BASE_MS` | `1000` | First backoff delay (doubles per retry) |
+| `UPMATH_MIN_INTERVAL_MS` | `100` | Minimum gap between API requests (politeness throttle for the public API) |
+
+Reliability behavior (built in, no flags needed):
+
+- **Retry with backoff** — 429/5xx responses and network errors are retried automatically.
+- **Session-wide render cache** — identical LaTeX+format pairs are fetched once per server session; re-running `render_paper` on an edited document only re-renders changed equations.
+- **Request throttling** — API calls are spaced by `UPMATH_MIN_INTERVAL_MS` to respect the public service's rate limits.
+- **Size guard** — expressions too large for the GET API fail fast with a clear message instead of a cryptic server error.
+
+## Tool Parameters
+
+Common conventions: `format` is `"svg"` (default) or `"png"`; `saveTo` writes the output to a file instead of returning it inline; file paths are resolved relative to the server's working directory (absolute paths are safest).
+
+**Single render / embed**
+
+- `render_equation({ latex, format?, saveTo? })` — `latex` is the raw (un-encoded) expression.
+- `render_tikz({ tikz, packages?, format?, saveTo? })` — `tikz` includes `\begin{tikzpicture}...\end{tikzpicture}`; `packages` is an array like `["circuitikz", "pgfplots"]` prepended as `\usepackage{...}`.
+- `get_render_url({ latex, format? })` — returns the `i.upmath.me` URL only; no API call, no file.
+- `check_syntax({ latex })` — renders to SVG and reports valid / empty / error.
+
+**Documents / papers**
+
+- `render_paper({ inputFile, outputFile, title?, author?, useUpmath? })` — full markdown paper → HTML. `useUpmath: false` (default) embeds KaTeX (fast, client-side); `useUpmath: true` renders every equation to server-side SVG (supports TikZ). `title` defaults to the first `#` heading.
+- `render_markdown_with_math({ markdown, saveTo? })` — markdown *string* (not a file) with `$$...$$` → HTML with embedded SVGs.
+- `scan_document_math({ inputFile, outputReport? })` — equation inventory, symbol frequency, numbering checks; `outputReport` saves the full JSON.
+- `validate_equations({ inputFile, maxEquations? })` — renders each equation to verify it; `maxEquations` caps API calls (default 50, `-1` = all).
+
+**Batch / iteration**
+
+- `render_batch({ equations, format?, outputDir })` — `equations` is `[{ name, latex }, ...]`; each saved as `<name>.<format>` in `outputDir`.
+- `render_batch_cached({ equations, format?, outputDir })` — same, reporting which files came from the session cache.
+- `render_equation_sheet({ title?, equations, saveTo? })` — `equations` is `[{ name, latex, description? }, ...]` → one reference-sheet HTML page.
+- `render_parameter_grid({ latexTemplate, paramName?, values, saveTo? })` — substitutes each of `values` for `{PARAM}` (or `{<paramName>}`) in the template and renders a comparison grid.
+- `render_diff({ before, after, label?, saveTo? })` — two LaTeX versions side by side as HTML.
+
+**Diagrams / notation**
+
+- `list_diagram_templates()` — no parameters.
+- `render_diagram_template({ template, params?, format?, saveTo? })` — `template` is one of `control-system`, `neural-network`, `state-machine`, `bayesian-network`, `signal-flow`, `data-plot`, `commutative-diagram`; `params` is an object (or JSON string) of template-specific overrides.
+- `build_notation_table({ inputFile, format?, saveTo? })` — `format` is `markdown` (default), `latex`, or `html`.
 
 ## Examples
 

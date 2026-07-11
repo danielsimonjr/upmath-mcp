@@ -7,7 +7,11 @@ var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -10594,7 +10598,6 @@ ZodNaN.create = (params) => {
     ...processCreateParams(params)
   });
 };
-var BRAND = Symbol("zod_brand");
 var ZodBranded = class extends ZodType {
   _parse(input) {
     const { ctx } = this._processInputParams(input);
@@ -11099,7 +11102,7 @@ function $constructor(name, initializer3, params) {
   Object.defineProperty(_, "name", { value: name });
   return _;
 }
-var $brand = Symbol("zod_brand");
+var $brand = /* @__PURE__ */ Symbol("zod_brand");
 var $ZodAsyncError = class extends Error {
   constructor() {
     super(`Encountered Promise during synchronous parse. Use .parseAsync() instead.`);
@@ -20842,8 +20845,8 @@ function yo_default() {
 
 // node_modules/zod/v4/core/registries.js
 var _a2;
-var $output = Symbol("ZodOutput");
-var $input = Symbol("ZodInput");
+var $output = /* @__PURE__ */ Symbol("ZodOutput");
+var $input = /* @__PURE__ */ Symbol("ZodInput");
 var $ZodRegistry = class {
   constructor() {
     this._map = /* @__PURE__ */ new WeakMap();
@@ -21880,7 +21883,7 @@ function _stringbool(Classes, _params) {
     type: "pipe",
     in: stringSchema,
     out: booleanSchema,
-    transform: (input, payload) => {
+    transform: ((input, payload) => {
       let data = input;
       if (params.case !== "sensitive")
         data = data.toLowerCase();
@@ -21899,14 +21902,14 @@ function _stringbool(Classes, _params) {
         });
         return {};
       }
-    },
-    reverseTransform: (input, _payload) => {
+    }),
+    reverseTransform: ((input, _payload) => {
       if (input === true) {
         return truthyArray[0] || "true";
       } else {
         return falsyArray[0] || "false";
       }
-    },
+    }),
     error: params.error
   });
   return codec2;
@@ -22935,10 +22938,10 @@ var ZodMiniType = /* @__PURE__ */ $constructor("ZodMiniType", (inst, def) => {
   inst.with = inst.check;
   inst.clone = (_def, params) => clone(inst, _def, params);
   inst.brand = () => inst;
-  inst.register = (reg, meta3) => {
+  inst.register = ((reg, meta3) => {
     reg.add(inst, meta3);
     return inst;
-  };
+  });
   inst.apply = (fn) => fn(inst);
 });
 var ZodMiniObject = /* @__PURE__ */ $constructor("ZodMiniObject", (inst, def) => {
@@ -26845,11 +26848,13 @@ function assertCompleteRequestPrompt(request) {
   if (request.params.ref.type !== "ref/prompt") {
     throw new TypeError(`Expected CompleteRequestPrompt, but got ${request.params.ref.type}`);
   }
+  void request;
 }
 function assertCompleteRequestResourceTemplate(request) {
   if (request.params.ref.type !== "ref/resource") {
     throw new TypeError(`Expected CompleteRequestResourceTemplate, but got ${request.params.ref.type}`);
   }
+  void request;
 }
 var CompleteResultSchema = ResultSchema.extend({
   completion: looseObject({
@@ -27002,7 +27007,7 @@ function isTerminal(status) {
 }
 
 // node_modules/zod-to-json-schema/dist/esm/Options.js
-var ignoreOverride = Symbol("Let zodToJsonSchema decide on which parser to use");
+var ignoreOverride = /* @__PURE__ */ Symbol("Let zodToJsonSchema decide on which parser to use");
 var defaultOptions = {
   name: void 0,
   $refStrategy: "root",
@@ -29978,7 +29983,7 @@ var Server = class extends Protocol {
 };
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/completable.js
-var COMPLETABLE_SYMBOL = Symbol.for("mcp.completable");
+var COMPLETABLE_SYMBOL = /* @__PURE__ */ Symbol.for("mcp.completable");
 function isCompletable(schema) {
   return !!schema && typeof schema === "object" && COMPLETABLE_SYMBOL in schema;
 }
@@ -30953,30 +30958,80 @@ import https from "https";
 import fs from "fs";
 import path from "path";
 var UPMATH_BASE = process.env.UPMATH_URL || "https://i.upmath.me";
+var UPMATH_TIMEOUT_MS = envInt("UPMATH_TIMEOUT_MS", 3e4);
+var UPMATH_RETRIES = envInt("UPMATH_RETRIES", 3);
+var UPMATH_RETRY_BASE_MS = envInt("UPMATH_RETRY_BASE_MS", 1e3);
+var UPMATH_MIN_INTERVAL_MS = envInt("UPMATH_MIN_INTERVAL_MS", 100);
+var MAX_URL_LENGTH = 8e3;
+function envInt(name, fallback) {
+  const n = parseInt(process.env[name], 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function fetchUrl(url2) {
   return new Promise((resolve, reject) => {
-    https.get(url2, { timeout: 3e4 }, (res) => {
-      if (res.statusCode !== 200) {
-        reject(new Error("HTTP " + res.statusCode + " from UpMath"));
-        res.resume();
-        return;
-      }
+    const req = https.get(url2, { timeout: UPMATH_TIMEOUT_MS }, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () => resolve(Buffer.concat(chunks)));
+      res.on("end", () => {
+        const body = Buffer.concat(chunks);
+        if (res.statusCode !== 200) {
+          const detail = body.toString("utf-8").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
+          const err = new Error("HTTP " + res.statusCode + " from UpMath" + (detail ? ": " + detail : ""));
+          err.statusCode = res.statusCode;
+          reject(err);
+          return;
+        }
+        resolve(body);
+      });
       res.on("error", reject);
-    }).on("error", reject);
+    });
+    req.on("timeout", () => req.destroy(new Error("UpMath request timed out after " + UPMATH_TIMEOUT_MS + "ms")));
+    req.on("error", reject);
   });
 }
+async function fetchWithRetry(url2) {
+  let lastErr;
+  for (let attempt = 0; attempt <= UPMATH_RETRIES; attempt++) {
+    if (attempt > 0) await sleep(UPMATH_RETRY_BASE_MS * 2 ** (attempt - 1));
+    try {
+      return await fetchUrl(url2);
+    } catch (err) {
+      lastErr = err;
+      const retriable = err.statusCode === void 0 || err.statusCode === 429 || err.statusCode >= 500;
+      if (!retriable) throw err;
+    }
+  }
+  throw lastErr;
+}
+var renderCache = /* @__PURE__ */ new Map();
+var RENDER_CACHE_MAX = 500;
+var lastRequestAt = 0;
 async function renderLatex(latex, format) {
   const encoded = encodeURIComponent(latex);
   const url2 = UPMATH_BASE + "/" + format + "/" + encoded;
-  const data = await fetchUrl(url2);
-  return { data, url: url2 };
+  const cacheKey = latex + "||" + format;
+  if (renderCache.has(cacheKey)) {
+    return { data: renderCache.get(cacheKey), url: url2, cached: true };
+  }
+  if (url2.length > MAX_URL_LENGTH) {
+    throw new Error(
+      "LaTeX too large for the UpMath GET API (" + url2.length + " chars encoded, limit ~" + MAX_URL_LENGTH + "). Split the expression or self-host (see UPMATH_URL)."
+    );
+  }
+  const wait = lastRequestAt + UPMATH_MIN_INTERVAL_MS - Date.now();
+  if (wait > 0) await sleep(wait);
+  lastRequestAt = Date.now();
+  const data = await fetchWithRetry(url2);
+  if (renderCache.size >= RENDER_CACHE_MAX) {
+    renderCache.delete(renderCache.keys().next().value);
+  }
+  renderCache.set(cacheKey, data);
+  return { data, url: url2, cached: false };
 }
 var server = new McpServer({
   name: "upmath-mcp",
-  version: "2.0.0"
+  version: "2.1.0"
 });
 server.tool(
   "render_equation",
@@ -31043,17 +31098,19 @@ server.tool(
     const absDir = path.resolve(outputDir);
     if (!fs.existsSync(absDir)) fs.mkdirSync(absDir, { recursive: true });
     const results = [];
+    let ok = 0;
     for (const eq of equations) {
       try {
         const result = await renderLatex(eq.latex, format);
         const filename = eq.name + "." + format;
         fs.writeFileSync(path.join(absDir, filename), result.data);
+        ok++;
         results.push("  " + filename + " (" + result.data.length + " bytes)");
       } catch (err) {
         results.push("  " + eq.name + ": ERROR - " + err.message);
       }
     }
-    return { content: [{ type: "text", text: "Rendered " + equations.length + " equations to " + absDir + ":\n" + results.join("\n") }] };
+    return { content: [{ type: "text", text: "Rendered " + ok + "/" + equations.length + " equations to " + absDir + ":\n" + results.join("\n") }] };
   }
 );
 server.tool(
@@ -31268,7 +31325,7 @@ function buildHtmlPage(title, author, body, useKatex) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${title}</title>${katexHead}
+<title>${escapeHtml(title)}</title>${katexHead}
 <style>
   body { font-family: "Times New Roman", Georgia, serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.8; color: #222; }
   h1 { font-size: 1.8em; text-align: center; margin: 40px 0 10px; }
@@ -31293,7 +31350,7 @@ function buildHtmlPage(title, author, body, useKatex) {
 </style>
 </head>
 <body>
-${author ? '<div class="author">' + author + "</div>" : ""}
+${author ? '<div class="author">' + escapeHtml(author) + "</div>" : ""}
 ${body}
 </body>
 </html>`;
@@ -31849,19 +31906,22 @@ server.tool(
   "Render a pre-built TikZ diagram template with custom parameters. Templates: control-system, neural-network, state-machine, bayesian-network, signal-flow, data-plot, commutative-diagram.",
   {
     template: external_exports.string().describe("Template name (e.g., 'control-system', 'neural-network')"),
-    params: external_exports.string().optional().default("{}").describe("Template parameters as JSON string (varies by template)"),
+    params: external_exports.union([external_exports.record(external_exports.string(), external_exports.unknown()), external_exports.string()]).optional().describe("Template parameters as an object (or JSON string), varies by template"),
     format: external_exports.enum(["svg", "png"]).default("svg").describe("Output format"),
     saveTo: external_exports.string().optional().describe("File path to save output")
   },
-  async ({ template, params: paramsStr, format, saveTo }) => {
+  async ({ template, params: rawParams, format, saveTo }) => {
     const tmpl = DIAGRAM_TEMPLATES[template];
     if (!tmpl) {
       return { content: [{ type: "text", text: "Unknown template: " + template + ". Use list_diagram_templates to see available templates." }] };
     }
-    let params = {};
-    try {
-      params = JSON.parse(paramsStr || "{}");
-    } catch {
+    let params = rawParams || {};
+    if (typeof params === "string") {
+      try {
+        params = JSON.parse(params);
+      } catch (err) {
+        return { content: [{ type: "text", text: "Invalid params JSON: " + err.message }] };
+      }
     }
     const tikzCode = tmpl.template(params);
     const result = await renderLatex(tikzCode, format);
@@ -31876,7 +31936,6 @@ server.tool(
     return { content: [{ type: "image", data: result.data.toString("base64"), mimeType: "image/png" }] };
   }
 );
-var renderCache = /* @__PURE__ */ new Map();
 server.tool(
   "render_batch_cached",
   "Render multiple equations with caching \u2014 skips re-rendering unchanged equations. Much faster for iterative editing. Cache persists within the MCP session.",
@@ -31893,28 +31952,27 @@ server.tool(
     if (!fs.existsSync(absDir)) fs.mkdirSync(absDir, { recursive: true });
     let rendered = 0;
     let cached2 = 0;
+    let failed = 0;
     const results = [];
     for (const eq of equations) {
-      const cacheKey = eq.latex + "||" + format;
       const filename = eq.name + "." + format;
       const filePath = path.join(absDir, filename);
-      if (renderCache.has(cacheKey)) {
-        fs.writeFileSync(filePath, renderCache.get(cacheKey).data);
-        cached2++;
-        results.push("  " + filename + " (cached)");
-      } else {
-        try {
-          const result = await renderLatex(eq.latex, format);
-          renderCache.set(cacheKey, { data: result.data, timestamp: Date.now() });
-          fs.writeFileSync(filePath, result.data);
+      try {
+        const result = await renderLatex(eq.latex, format);
+        fs.writeFileSync(filePath, result.data);
+        if (result.cached) {
+          cached2++;
+          results.push("  " + filename + " (cached)");
+        } else {
           rendered++;
           results.push("  " + filename + " (" + result.data.length + " bytes)");
-        } catch (err) {
-          results.push("  " + eq.name + ": ERROR - " + err.message);
         }
+      } catch (err) {
+        failed++;
+        results.push("  " + eq.name + ": ERROR - " + err.message);
       }
     }
-    return { content: [{ type: "text", text: "Batch render: " + rendered + " rendered, " + cached2 + " from cache\n" + results.join("\n") }] };
+    return { content: [{ type: "text", text: "Batch render: " + rendered + " rendered, " + cached2 + " from cache" + (failed ? ", " + failed + " failed" : "") + "\n" + results.join("\n") }] };
   }
 );
 server.tool(
@@ -31949,7 +32007,7 @@ server.tool(
   .latex-source { background: #f8f8f8; padding: 8px; font-family: monospace; font-size: 12px; white-space: pre-wrap; margin-top: 12px; border-radius: 4px; }
   svg { max-width: 100%; }
 </style></head><body>
-<h2>${label} \u2014 Comparison</h2>
+<h2>${escapeHtml(label)} \u2014 Comparison</h2>
 <div class="diff">
   <div class="version before">
     <h3 style="color:#e74c3c">Before</h3>
@@ -31996,7 +32054,7 @@ server.tool(
     }
     const cellsHtml = cells.map(
       (c) => `<div class="cell">
-        <div class="value">${paramName} = ${c.value}</div>
+        <div class="value">${escapeHtml(paramName)} = ${escapeHtml(c.value)}</div>
         <div class="render">${c.svg}</div>
       </div>`
     ).join("\n");
