@@ -7,6 +7,31 @@ All notable changes to the UpMath MCP server. Format follows
 
 ## [Unreleased]
 
+---
+
+## [2.1.0] - 2026-07-11
+
+### Added
+- **Retry with exponential backoff** for 429/5xx and network errors (`UPMATH_RETRIES`, default 3; `UPMATH_RETRY_BASE_MS`, default 1000), plus a **politeness throttle** between API requests (`UPMATH_MIN_INTERVAL_MS`, default 100ms) — closes the TODO about rate limiting on the public i.upmath.me.
+- **Session-wide render cache** (bounded, 500 entries): identical LaTeX+format is fetched once per server session, so every tool benefits — re-running `render_paper` on an edited document only re-renders changed equations. `render_batch_cached` now uses the shared cache.
+- **URL size guard**: expressions whose encoded GET URL exceeds ~8k chars fail fast with a clear message instead of a cryptic server error.
+- **`.claude-plugin/marketplace.json`** — the repo is now its own plugin marketplace: `/plugin marketplace add danielsimonjr/upmath-mcp` + `/plugin install upmath-mcp@upmath`.
+- **Portable network-free smoke test** (`npm test`, wired into CI): MCP handshake, tools/list count, and every tool that works offline, using a temp-dir fixture. Set `UPMATH_TEST_NETWORK=1` to also hit the live API. Replaces the old test script that was hardcoded to local Windows paths.
+- README: plugin install instructions, configuration/env-var table, and a full tool-parameter reference for all 16 tools (closes the "document the 10 undocumented tools" TODO).
+
+### Fixed
+- **Hanging requests**: the HTTP timeout was configured but never handled, so a stalled UpMath request hung the tool forever. Timeouts now destroy the request and surface a clear error; non-200 responses include the response body's text in the error message.
+- **HTML injection in generated pages**: `title`, `author`, `render_diff` labels, and `render_parameter_grid` param names/values are now HTML-escaped.
+- `render_diagram_template` accepts `params` as a real object (or a JSON string) and reports JSON parse errors instead of silently falling back to defaults.
+- `render_batch` reports the actual success count (`N/M`) instead of claiming all equations rendered when some failed.
+
+### Changed
+- Plugin manifest (`plugin.json`) now carries author, homepage, repository, license, and keywords.
+
+---
+
+## [2.0.x plugin packaging] - 2026-07-09
+
 ### Added
 - **Packaged as a Claude Code plugin** (`e784c0b`, 2026-07-09): `.claude-plugin/plugin.json`, `.mcp.json` (`${CLAUDE_PLUGIN_ROOT}/bundle/index.mjs`), and a committed self-contained `bundle/index.mjs` (esbuild-bundled `server.js` + `@modelcontextprotocol/sdk` + `zod`, node20 ESM) so the plugin runs with no `node_modules` at the plugin root. Added `scripts/bundle.mjs` + `npm run bundle`, matching the sibling `*-mcp` plugins.
 - **Companion `upmath` skill** (`skills/upmath/SKILL.md`): a playbook for all 16 tools and the UpMath round-trip, flagging the `render_paper` `useUpmath: true` requirement for the Beyond the Bat publish workflow (which mandates UpMath server-side SVG over KaTeX).

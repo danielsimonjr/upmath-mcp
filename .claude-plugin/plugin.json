@@ -1,5 +1,13 @@
 {
   "name": "upmath-mcp",
-  "version": "2.0.0",
-  "description": "LaTeX / TikZ / markdown-math rendering to SVG, PNG, and HTML via i.upmath.me (no local TeX install) + upmath skill."
+  "version": "2.1.0",
+  "description": "LaTeX / TikZ / markdown-math rendering to SVG, PNG, and HTML via i.upmath.me (no local TeX install) + upmath skill.",
+  "author": {
+    "name": "Daniel Simon Jr.",
+    "email": "Daniel@danielsimonjr.com"
+  },
+  "homepage": "https://github.com/danielsimonjr/upmath-mcp",
+  "repository": "https://github.com/danielsimonjr/upmath-mcp",
+  "license": "MIT",
+  "keywords": ["latex", "tikz", "math", "svg", "upmath", "rendering"]
 }

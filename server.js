@@ -21,33 +21,98 @@ import fs from "fs";
 import path from "path";
 
 const UPMATH_BASE = process.env.UPMATH_URL || "https://i.upmath.me";
+const UPMATH_TIMEOUT_MS = envInt("UPMATH_TIMEOUT_MS", 30000);
+const UPMATH_RETRIES = envInt("UPMATH_RETRIES", 3);
+const UPMATH_RETRY_BASE_MS = envInt("UPMATH_RETRY_BASE_MS", 1000);
+const UPMATH_MIN_INTERVAL_MS = envInt("UPMATH_MIN_INTERVAL_MS", 100);
+// nginx default large_client_header_buffers caps request lines around 8k.
+const MAX_URL_LENGTH = 8000;
+
+function envInt(name, fallback) {
+  const n = parseInt(process.env[name], 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function fetchUrl(url) {
   return new Promise((resolve, reject) => {
-    https.get(url, { timeout: 30000 }, (res) => {
-      if (res.statusCode !== 200) {
-        reject(new Error("HTTP " + res.statusCode + " from UpMath"));
-        res.resume();
-        return;
-      }
+    const req = https.get(url, { timeout: UPMATH_TIMEOUT_MS }, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () => resolve(Buffer.concat(chunks)));
+      res.on("end", () => {
+        const body = Buffer.concat(chunks);
+        if (res.statusCode !== 200) {
+          const detail = body.toString("utf-8").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
+          const err = new Error("HTTP " + res.statusCode + " from UpMath" + (detail ? ": " + detail : ""));
+          err.statusCode = res.statusCode;
+          reject(err);
+          return;
+        }
+        resolve(body);
+      });
       res.on("error", reject);
-    }).on("error", reject);
+    });
+    req.on("timeout", () => req.destroy(new Error("UpMath request timed out after " + UPMATH_TIMEOUT_MS + "ms")));
+    req.on("error", reject);
   });
 }
+
+// Retry 429/5xx and network errors with exponential backoff (1s, 2s, 4s by default).
+async function fetchWithRetry(url) {
+  let lastErr;
+  for (let attempt = 0; attempt <= UPMATH_RETRIES; attempt++) {
+    if (attempt > 0) await sleep(UPMATH_RETRY_BASE_MS * 2 ** (attempt - 1));
+    try {
+      return await fetchUrl(url);
+    } catch (err) {
+      lastErr = err;
+      const retriable = err.statusCode === undefined || err.statusCode === 429 || err.statusCode >= 500;
+      if (!retriable) throw err;
+    }
+  }
+  throw lastErr;
+}
+
+// Session-wide render cache: the API is idempotent (same LaTeX -> same SVG),
+// so every tool benefits, not just render_batch_cached.
+const renderCache = new Map(); // latex||format -> Buffer
+const RENDER_CACHE_MAX = 500;
+
+let lastRequestAt = 0;
 
 async function renderLatex(latex, format) {
   const encoded = encodeURIComponent(latex);
   const url = UPMATH_BASE + "/" + format + "/" + encoded;
-  const data = await fetchUrl(url);
-  return { data, url };
+
+  const cacheKey = latex + "||" + format;
+  if (renderCache.has(cacheKey)) {
+    return { data: renderCache.get(cacheKey), url, cached: true };
+  }
+
+  if (url.length > MAX_URL_LENGTH) {
+    throw new Error(
+      "LaTeX too large for the UpMath GET API (" + url.length + " chars encoded, limit ~" + MAX_URL_LENGTH +
+      "). Split the expression or self-host (see UPMATH_URL)."
+    );
+  }
+
+  // Throttle: be polite to the public rate-limited API.
+  const wait = lastRequestAt + UPMATH_MIN_INTERVAL_MS - Date.now();
+  if (wait > 0) await sleep(wait);
+  lastRequestAt = Date.now();
+
+  const data = await fetchWithRetry(url);
+  if (renderCache.size >= RENDER_CACHE_MAX) {
+    renderCache.delete(renderCache.keys().next().value);
+  }
+  renderCache.set(cacheKey, data);
+  return { data, url, cached: false };
 }
 
 const server = new McpServer({
   name: "upmath-mcp",
-  version: "2.0.0",
+  version: "2.1.0",
 });
 
 server.tool(
@@ -117,17 +182,19 @@ server.tool(
     const absDir = path.resolve(outputDir);
     if (!fs.existsSync(absDir)) fs.mkdirSync(absDir, { recursive: true });
     const results = [];
+    let ok = 0;
     for (const eq of equations) {
       try {
         const result = await renderLatex(eq.latex, format);
         const filename = eq.name + "." + format;
         fs.writeFileSync(path.join(absDir, filename), result.data);
+        ok++;
         results.push("  " + filename + " (" + result.data.length + " bytes)");
       } catch (err) {
         results.push("  " + eq.name + ": ERROR - " + err.message);
       }
     }
-    return { content: [{ type: "text", text: "Rendered " + equations.length + " equations to " + absDir + ":\n" + results.join("\n") }] };
+    return { content: [{ type: "text", text: "Rendered " + ok + "/" + equations.length + " equations to " + absDir + ":\n" + results.join("\n") }] };
   }
 );
 
@@ -395,7 +462,7 @@ function buildHtmlPage(title, author, body, useKatex) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${title}</title>${katexHead}
+<title>${escapeHtml(title)}</title>${katexHead}
 <style>
   body { font-family: "Times New Roman", Georgia, serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.8; color: #222; }
   h1 { font-size: 1.8em; text-align: center; margin: 40px 0 10px; }
@@ -420,7 +487,7 @@ function buildHtmlPage(title, author, body, useKatex) {
 </style>
 </head>
 <body>
-${author ? '<div class="author">' + author + "</div>" : ""}
+${author ? '<div class="author">' + escapeHtml(author) + "</div>" : ""}
 ${body}
 </body>
 </html>`;
@@ -1038,17 +1105,23 @@ server.tool(
   "Render a pre-built TikZ diagram template with custom parameters. Templates: control-system, neural-network, state-machine, bayesian-network, signal-flow, data-plot, commutative-diagram.",
   {
     template: z.string().describe("Template name (e.g., 'control-system', 'neural-network')"),
-    params: z.string().optional().default("{}").describe("Template parameters as JSON string (varies by template)"),
+    params: z.union([z.record(z.string(), z.unknown()), z.string()]).optional().describe("Template parameters as an object (or JSON string), varies by template"),
     format: z.enum(["svg", "png"]).default("svg").describe("Output format"),
     saveTo: z.string().optional().describe("File path to save output"),
   },
-  async ({ template, params: paramsStr, format, saveTo }) => {
+  async ({ template, params: rawParams, format, saveTo }) => {
     const tmpl = DIAGRAM_TEMPLATES[template];
     if (!tmpl) {
       return { content: [{ type: "text", text: "Unknown template: " + template + ". Use list_diagram_templates to see available templates." }] };
     }
-    let params = {};
-    try { params = JSON.parse(paramsStr || "{}"); } catch { /* use defaults */ }
+    let params = rawParams || {};
+    if (typeof params === "string") {
+      try {
+        params = JSON.parse(params);
+      } catch (err) {
+        return { content: [{ type: "text", text: "Invalid params JSON: " + err.message }] };
+      }
+    }
     const tikzCode = tmpl.template(params);
     const result = await renderLatex(tikzCode, format);
 
@@ -1069,8 +1142,6 @@ server.tool(
 // C. RENDER PIPELINE IMPROVEMENTS
 // ============================================================
 
-const renderCache = new Map(); // latex+format -> {data, timestamp}
-
 server.tool(
   "render_batch_cached",
   "Render multiple equations with caching — skips re-rendering unchanged equations. Much faster for iterative editing. Cache persists within the MCP session.",
@@ -1088,31 +1159,29 @@ server.tool(
 
     let rendered = 0;
     let cached = 0;
+    let failed = 0;
     const results = [];
 
     for (const eq of equations) {
-      const cacheKey = eq.latex + "||" + format;
       const filename = eq.name + "." + format;
       const filePath = path.join(absDir, filename);
-
-      if (renderCache.has(cacheKey)) {
-        fs.writeFileSync(filePath, renderCache.get(cacheKey).data);
-        cached++;
-        results.push("  " + filename + " (cached)");
-      } else {
-        try {
-          const result = await renderLatex(eq.latex, format);
-          renderCache.set(cacheKey, { data: result.data, timestamp: Date.now() });
-          fs.writeFileSync(filePath, result.data);
+      try {
+        const result = await renderLatex(eq.latex, format);
+        fs.writeFileSync(filePath, result.data);
+        if (result.cached) {
+          cached++;
+          results.push("  " + filename + " (cached)");
+        } else {
           rendered++;
           results.push("  " + filename + " (" + result.data.length + " bytes)");
-        } catch (err) {
-          results.push("  " + eq.name + ": ERROR - " + err.message);
         }
+      } catch (err) {
+        failed++;
+        results.push("  " + eq.name + ": ERROR - " + err.message);
       }
     }
 
-    return { content: [{ type: "text", text: "Batch render: " + rendered + " rendered, " + cached + " from cache\n" + results.join("\n") }] };
+    return { content: [{ type: "text", text: "Batch render: " + rendered + " rendered, " + cached + " from cache" + (failed ? ", " + failed + " failed" : "") + "\n" + results.join("\n") }] };
   }
 );
 
@@ -1149,7 +1218,7 @@ server.tool(
   .latex-source { background: #f8f8f8; padding: 8px; font-family: monospace; font-size: 12px; white-space: pre-wrap; margin-top: 12px; border-radius: 4px; }
   svg { max-width: 100%; }
 </style></head><body>
-<h2>${label} — Comparison</h2>
+<h2>${escapeHtml(label)} — Comparison</h2>
 <div class="diff">
   <div class="version before">
     <h3 style="color:#e74c3c">Before</h3>
@@ -1205,7 +1274,7 @@ server.tool(
 
     const cellsHtml = cells.map(c =>
       `<div class="cell">
-        <div class="value">${paramName} = ${c.value}</div>
+        <div class="value">${escapeHtml(paramName)} = ${escapeHtml(c.value)}</div>
         <div class="render">${c.svg}</div>
       </div>`
     ).join("\n");
