@@ -7,6 +7,13 @@ All notable changes to the UpMath MCP server. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Windows CI leg.** CI ran on `ubuntu-latest` only — but Windows is the *production*
+  platform for this MCP server (it runs on Daniel's Windows box), so CI had never once
+  tested the OS the server actually ships on. The `build` job now runs a
+  `[ubuntu-latest, windows-latest]` matrix.
+
 ---
 
 ## [2.1.0] - 2026-07-11
