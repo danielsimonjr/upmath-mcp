@@ -1,6 +1,6 @@
 ---
 name: upmath
-description: Render LaTeX, TikZ, and markdown-with-math to SVG/PNG/HTML via the upmath-mcp server (i.upmath.me API, no local TeX install). Use when the user wants to render an equation or diagram to an image, validate/scan LaTeX in a document, get an embeddable UpMath image URL, build an equation sheet or notation table, or convert a markdown/LaTeX paper with `$$...$$` math into publication-ready HTML — including the "UpMath round-trip" that turns an assembled paper `Complete.md` into `paper.html`. Triggers: "render this equation/TikZ/circuit", "LaTeX to SVG/PNG", "check/scan my LaTeX", "embed this equation", "equation sheet", "run the UpMath round-trip", "regenerate paper.html", "markdown math to HTML".
+description: 'Render LaTeX, TikZ, and markdown-with-math to SVG/PNG/HTML via the upmath-mcp server (i.upmath.me API, no local TeX install). Use when the user wants to render an equation or diagram to an image, validate/scan LaTeX in a document, get an embeddable UpMath image URL, build an equation sheet or notation table, or convert a markdown/LaTeX paper with `$$...$$` math into publication-ready HTML — including the "UpMath round-trip" that turns an assembled paper `Complete.md` into `paper.html`. Triggers: "render this equation/TikZ/circuit", "LaTeX to SVG/PNG", "check/scan my LaTeX", "embed this equation", "equation sheet", "run the UpMath round-trip", "regenerate paper.html", "markdown math to HTML".'
 ---
 
 # UpMath — LaTeX/TikZ/markdown-math rendering (no local TeX)

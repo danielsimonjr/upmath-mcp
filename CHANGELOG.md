@@ -7,6 +7,17 @@ All notable changes to the UpMath MCP server. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The `upmath` skill's YAML frontmatter did not parse, so Claude Code logged a load error for
+  this plugin on every startup.** `description:` was an *unquoted* YAML scalar containing `": "`
+  (`… Triggers: "render this equation/TikZ/circuit" …`) plus embedded double quotes. YAML reads an
+  unquoted scalar with `": "` in it as a nested mapping, so the entire frontmatter block failed:
+  `Failed to parse YAML frontmatter in skills/upmath/SKILL.md: YAML Parse error: Unexpected token`.
+  The description is now a single-quoted scalar (single quotes, because the value itself contains
+  double quotes). Verified against Claude Code's own loader (`claude --debug-file`): the warning is
+  gone. **Lesson for any future SKILL.md: a description containing a colon-space must be quoted.**
+
 ### Added
 
 - **Windows CI leg.** CI ran on `ubuntu-latest` only — but Windows is the *production*
