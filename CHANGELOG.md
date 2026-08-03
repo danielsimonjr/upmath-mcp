@@ -7,6 +7,17 @@ All notable changes to the UpMath MCP server. Format follows
 
 ## [Unreleased]
 
+### Security (2026-08-03)
+
+- `@hono/node-server` 1.19.x -> 2.0.12 (medium, needs 2.0.5), via
+  `@modelcontextprotocol/sdk` 1.29.0 -> 1.30.0.
+
+The hono fix required an indirection: the MCP SDK pinned `@hono/node-server`
+to `^1.19.9`, so no in-range update could reach 2.x. SDK 1.30.0 widened that
+to `^1.19.9 || ^2.0.5` and is itself inside the existing SDK range, so the
+fix is lock-only — no manifest change.
+
+
 ### Fixed
 
 - **The `upmath` skill's YAML frontmatter did not parse, so Claude Code logged a load error for
