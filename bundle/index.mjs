@@ -31077,9 +31077,10 @@ async function renderLatex(latex, format) {
   renderCache.set(cacheKey, data);
   return { data, url: url2, cached: false };
 }
+var VERSION = true ? "2.1.2" : "0.0.0-dev";
 var server = new McpServer({
   name: "upmath-mcp",
-  version: "2.1.0"
+  version: VERSION
 });
 server.tool(
   "render_equation",

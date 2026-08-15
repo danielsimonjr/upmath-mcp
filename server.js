@@ -110,9 +110,11 @@ async function renderLatex(latex, format) {
   return { data, url, cached: false };
 }
 
+const VERSION = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+
 const server = new McpServer({
   name: "upmath-mcp",
-  version: "2.1.0",
+  version: VERSION,
 });
 
 server.tool(

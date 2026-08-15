@@ -1,6 +1,6 @@
 {
   "name": "upmath-mcp",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "UpMath MCP server - LaTeX rendering, document intelligence, diagram templates, and interactive exploration via i.upmath.me",
   "main": "server.js",
   "type": "module",
