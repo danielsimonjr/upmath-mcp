@@ -1,6 +1,6 @@
 {
   "name": "upmath-mcp",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "UpMath MCP server - LaTeX rendering, document intelligence, diagram templates, and interactive exploration via i.upmath.me",
   "main": "server.js",
   "type": "module",
@@ -12,7 +12,15 @@
     "bundle": "node scripts/bundle.mjs",
     "test": "node test.js"
   },
-  "keywords": ["mcp", "upmath", "latex", "tikz", "svg", "claude-code", "math-rendering"],
+  "keywords": [
+    "mcp",
+    "upmath",
+    "latex",
+    "tikz",
+    "svg",
+    "claude-code",
+    "math-rendering"
+  ],
   "author": "Daniel Simon Jr. <Daniel@danielsimonjr.com>",
   "license": "MIT",
   "dependencies": {
