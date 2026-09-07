@@ -31,13 +31,15 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: '1.4.0'
+          bun-version: '1.4.2'
       - run: bun install --frozen-lockfile
-      # --if-present: run each stage only if the repo defines it (universal template).
-      - run: bun run --if-present typecheck
-      - run: bun run --if-present lint
-      - run: bun run --if-present test
-      - run: bun run --if-present build
+      # NOT --if-present. That flag succeeds silently when a script is missing, so a
+      # renamed script produces a green run that checked nothing. These three all
+      # exist; if one is removed, CI should fail and say so. (`test` builds first,
+      # then drives the BUILT artifact over stdio.)
+      - run: bun run typecheck
+      - run: bun run build
+      - run: bun run test
 
       # Production runtime is NODE; Bun is the dev toolchain. Every step above runs under
       # Bun, so without this the shipped artifact is never executed by the runtime that
@@ -50,7 +52,7 @@ jobs:
       - name: Node runtime smoke (the shipped artifact must load under Node)
         run: |
           node --input-type=module -e '
-            const entry = "./server.js";
+            const entry = "./dist/index.js";
             const t = setTimeout(() => {
               console.log("PASS: self-started under Node, no crash within 5s");
               process.exit(0);

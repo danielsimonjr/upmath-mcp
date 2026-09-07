@@ -31001,7 +31001,7 @@ var StdioServerTransport = class {
   }
 };
 
-// server.js
+// src/index.ts
 import https from "https";
 import fs from "fs";
 import path from "path";
@@ -31011,8 +31011,11 @@ var UPMATH_RETRIES = envInt("UPMATH_RETRIES", 3);
 var UPMATH_RETRY_BASE_MS = envInt("UPMATH_RETRY_BASE_MS", 1e3);
 var UPMATH_MIN_INTERVAL_MS = envInt("UPMATH_MIN_INTERVAL_MS", 100);
 var MAX_URL_LENGTH = 8e3;
+function errMessage(err) {
+  return err instanceof Error ? errMessage(err) : String(err);
+}
 function envInt(name, fallback) {
-  const n = parseInt(process.env[name], 10);
+  const n = parseInt(process.env[name] ?? "", 10);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -31025,7 +31028,9 @@ function fetchUrl(url2) {
         const body = Buffer.concat(chunks);
         if (res.statusCode !== 200) {
           const detail = body.toString("utf-8").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
-          const err = new Error("HTTP " + res.statusCode + " from UpMath" + (detail ? ": " + detail : ""));
+          const err = new Error(
+            "HTTP " + res.statusCode + " from UpMath" + (detail ? ": " + detail : "")
+          );
           err.statusCode = res.statusCode;
           reject(err);
           return;
@@ -31046,7 +31051,8 @@ async function fetchWithRetry(url2) {
       return await fetchUrl(url2);
     } catch (err) {
       lastErr = err;
-      const retriable = err.statusCode === void 0 || err.statusCode === 429 || err.statusCode >= 500;
+      const status = err.statusCode;
+      const retriable = status === void 0 || status === 429 || status >= 500;
       if (!retriable) throw err;
     }
   }
@@ -31072,7 +31078,8 @@ async function renderLatex(latex, format) {
   lastRequestAt = Date.now();
   const data = await fetchWithRetry(url2);
   if (renderCache.size >= RENDER_CACHE_MAX) {
-    renderCache.delete(renderCache.keys().next().value);
+    const oldest = renderCache.keys().next().value;
+    if (oldest !== void 0) renderCache.delete(oldest);
   }
   renderCache.set(cacheKey, data);
   return { data, url: url2, cached: false };
@@ -31156,7 +31163,7 @@ server.tool(
         ok++;
         results.push("  " + filename + " (" + result.data.length + " bytes)");
       } catch (err) {
-        results.push("  " + eq.name + ": ERROR - " + err.message);
+        results.push("  " + eq.name + ": ERROR - " + errMessage(err));
       }
     }
     return { content: [{ type: "text", text: "Rendered " + ok + "/" + equations.length + " equations to " + absDir + ":\n" + results.join("\n") }] };
@@ -31175,7 +31182,7 @@ server.tool(
       const hasContent = svg.includes("<path") || svg.includes("<text") || svg.includes("<g");
       return { content: [{ type: "text", text: hasContent ? "Valid LaTeX. Rendered successfully (" + result.data.length + " bytes SVG)." : "Warning: rendered but produced minimal SVG. Check syntax." }] };
     } catch (err) {
-      return { content: [{ type: "text", text: "Invalid LaTeX: " + err.message }] };
+      return { content: [{ type: "text", text: "Invalid LaTeX: " + errMessage(err) }] };
     }
   }
 );
@@ -31211,7 +31218,7 @@ server.tool(
         const result = await renderLatex(match[1].trim(), "svg");
         parts.push({ type: "svg", content: result.data.toString("utf-8") });
       } catch (err) {
-        parts.push({ type: "error", content: "[Render error: " + err.message + "]" });
+        parts.push({ type: "error", content: "[Render error: " + errMessage(err) + "]" });
       }
       lastIndex = match.index + match[0].length;
     }
@@ -31304,7 +31311,7 @@ server.tool(
         }
         html += convertLineToHtml(processed) + "\n";
       }
-      const fullHtml = buildHtmlPage(title || "Document", author, html, false);
+      const fullHtml = buildHtmlPage(title || "Document", author ?? "", html, false);
       fs.writeFileSync(absOutput, fullHtml, "utf-8");
       return { content: [{ type: "text", text: "Rendered " + mathCount + " equations via UpMath API. Saved to: " + absOutput + " (" + fullHtml.length + " bytes)" }] };
     } else {
@@ -31335,7 +31342,7 @@ server.tool(
         });
         html += convertLineToHtml(processed) + "\n";
       }
-      const fullHtml = buildHtmlPage(title || "Document", author, html, true);
+      const fullHtml = buildHtmlPage(title || "Document", author ?? "", html, true);
       fs.writeFileSync(absOutput, fullHtml, "utf-8");
       return { content: [{ type: "text", text: "Rendered with KaTeX (client-side). Saved to: " + absOutput + " (" + fullHtml.length + " bytes)" }] };
     }
@@ -31728,7 +31735,7 @@ server.tool(
         }
       } catch (err) {
         errors++;
-        results.push({ line: eq.line, status: "error", issues: [err.message], latex: eq.latex.slice(0, 60) });
+        results.push({ line: eq.line, status: "error", issues: [errMessage(err)], latex: eq.latex.slice(0, 60) });
       }
     }
     const summary = [
@@ -31911,7 +31918,7 @@ var DIAGRAM_TEMPLATES = {
   label style={font=\\small},
 ]
 \\addplot[${style}] coordinates {
-  ${xdata.split(",").map((x, i) => "(" + x.trim() + "," + ydata.split(",")[i].trim() + ")").join(" ")}
+  ${xdata.split(",").map((x, i) => "(" + x.trim() + "," + (ydata.split(",")[i] ?? "").trim() + ")").join(" ")}
 };
 \\end{axis}
 \\end{tikzpicture}`;
@@ -31969,7 +31976,7 @@ server.tool(
       try {
         params = JSON.parse(params);
       } catch (err) {
-        return { content: [{ type: "text", text: "Invalid params JSON: " + err.message }] };
+        return { content: [{ type: "text", text: "Invalid params JSON: " + errMessage(err) }] };
       }
     }
     const tikzCode = tmpl.template(params);
@@ -32018,7 +32025,7 @@ server.tool(
         }
       } catch (err) {
         failed++;
-        results.push("  " + eq.name + ": ERROR - " + err.message);
+        results.push("  " + eq.name + ": ERROR - " + errMessage(err));
       }
     }
     return { content: [{ type: "text", text: "Batch render: " + rendered + " rendered, " + cached2 + " from cache" + (failed ? ", " + failed + " failed" : "") + "\n" + results.join("\n") }] };
@@ -32038,12 +32045,12 @@ server.tool(
     try {
       beforeSvg = (await renderLatex(before, "svg")).data.toString("utf-8");
     } catch (err) {
-      beforeSvg = '<span style="color:red">Render error: ' + err.message + "</span>";
+      beforeSvg = '<span style="color:red">Render error: ' + errMessage(err) + "</span>";
     }
     try {
       afterSvg = (await renderLatex(after, "svg")).data.toString("utf-8");
     } catch (err) {
-      afterSvg = '<span style="color:red">Render error: ' + err.message + "</span>";
+      afterSvg = '<span style="color:red">Render error: ' + errMessage(err) + "</span>";
     }
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
@@ -32097,7 +32104,7 @@ server.tool(
       try {
         svg = (await renderLatex(latex, "svg")).data.toString("utf-8");
       } catch (err) {
-        svg = '<span style="color:red">Error: ' + err.message + "</span>";
+        svg = '<span style="color:red">Error: ' + errMessage(err) + "</span>";
       }
       cells.push({ value: val, svg, latex });
     }
@@ -32147,7 +32154,7 @@ server.tool(
       try {
         svg = (await renderLatex(eq.latex, "svg")).data.toString("utf-8");
       } catch (err) {
-        svg = '<span style="color:red">Error: ' + err.message + "</span>";
+        svg = '<span style="color:red">Error: ' + errMessage(err) + "</span>";
       }
       rows.push(`<tr>
         <td class="eq-name">${escapeHtml(eq.name)}</td>

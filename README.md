@@ -70,8 +70,12 @@ This loads the bundled server (no `npm install` needed) plus the companion `upma
 ```bash
 git clone https://github.com/danielsimonjr/upmath-mcp.git
 cd upmath-mcp
-npm install
+bun install
+bun run build
 ```
+
+The server is TypeScript and builds to `dist/`. Bun is the development
+toolchain; Node is the runtime the server ships on.
 
 Add to `~/.claude/.mcp.json`:
 
@@ -80,7 +84,7 @@ Add to `~/.claude/.mcp.json`:
   "mcpServers": {
     "upmath": {
       "command": "node",
-      "args": ["/path/to/upmath-mcp/server.js"]
+      "args": ["/path/to/upmath-mcp/dist/index.js"]
     }
   }
 }

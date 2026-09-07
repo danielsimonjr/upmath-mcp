@@ -8,7 +8,7 @@
  * a temp-dir fixture. Set UPMATH_TEST_NETWORK=1 to also exercise a live
  * render_equation call against the API.
  *
- * Exits 0 on success, 1 on any failure — safe to run in CI via `npm test`.
+ * Exits 0 on success, 1 on any failure — safe to run in CI via `bun run test`.
  */
 import { spawn } from "child_process";
 import { createInterface } from "readline";
@@ -33,8 +33,15 @@ $$
 With prediction error $$\\varepsilon_l = y_l - g_l(\\mu_l)$$ at each level.
 `, "utf-8");
 
-const server = spawn(process.execPath, ["server.js"], {
-  cwd: import.meta.dirname,
+// Runs the BUILT artifact, not the TypeScript source: a packaging fault (missing
+// shebang, bad emitted specifier, unbuilt dist) can only fail here.
+// The repo root, not this script's directory. This file used to live at the repo
+// root, where `import.meta.dirname` WAS the root; after the move it silently became
+// scripts/, and the server was launched from a path that does not exist.
+const ROOT = path.resolve(import.meta.dirname, "..");
+
+const server = spawn(process.execPath, [path.join(ROOT, "dist", "index.js")], {
+  cwd: ROOT,
   stdio: ["pipe", "pipe", "inherit"],
 });
 

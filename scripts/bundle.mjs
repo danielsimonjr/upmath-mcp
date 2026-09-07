@@ -16,10 +16,12 @@ const banner =
   "const __dirname = __dirnameOf(__filename);";
 
 // Self-contained single-file server for the Claude Code plugin (bundle/index.mjs).
-// Bundles server.js + all deps (@modelcontextprotocol/sdk, zod) into one ESM file
+// Bundles src/index.ts + all deps (@modelcontextprotocol/sdk, zod) into one ESM file.
+// esbuild compiles the TypeScript itself, so this does not depend on `bun run build`
+// having run first -- one less ordering rule to remember.
 // so the plugin runs with no node_modules present at the plugin root.
 await build({
-  entryPoints: ["server.js"],
+  entryPoints: ["src/index.ts"],
   bundle: true,
   platform: "node",
   target: "node20",

@@ -28,23 +28,37 @@ const UPMATH_MIN_INTERVAL_MS = envInt("UPMATH_MIN_INTERVAL_MS", 100);
 // nginx default large_client_header_buffers caps request lines around 8k.
 const MAX_URL_LENGTH = 8000;
 
-function envInt(name, fallback) {
-  const n = parseInt(process.env[name], 10);
+/** Message text for anything thrown. A non-Error throw must not render as
+ * "undefined", which reports a failure while hiding what it was. */
+function errMessage(err: unknown): string {
+  return err instanceof Error ? errMessage(err) : String(err);
+}
+
+function envInt(name: string, fallback: number): number {
+  const n = parseInt(process.env[name] ?? "", 10);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
-function fetchUrl(url) {
+/** An HTTP failure carries the status so the retry policy can read it. */
+interface HttpError extends Error {
+  statusCode?: number;
+}
+
+function fetchUrl(url: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const req = https.get(url, { timeout: UPMATH_TIMEOUT_MS }, (res) => {
-      const chunks = [];
+      const chunks: Buffer[] = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => {
         const body = Buffer.concat(chunks);
         if (res.statusCode !== 200) {
           const detail = body.toString("utf-8").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
-          const err = new Error("HTTP " + res.statusCode + " from UpMath" + (detail ? ": " + detail : ""));
+          const err: HttpError = new Error(
+            "HTTP " + res.statusCode + " from UpMath" + (detail ? ": " + detail : ""),
+          );
           err.statusCode = res.statusCode;
           reject(err);
           return;
@@ -59,15 +73,16 @@ function fetchUrl(url) {
 }
 
 // Retry 429/5xx and network errors with exponential backoff (1s, 2s, 4s by default).
-async function fetchWithRetry(url) {
-  let lastErr;
+async function fetchWithRetry(url: string): Promise<Buffer> {
+  let lastErr: unknown;
   for (let attempt = 0; attempt <= UPMATH_RETRIES; attempt++) {
     if (attempt > 0) await sleep(UPMATH_RETRY_BASE_MS * 2 ** (attempt - 1));
     try {
       return await fetchUrl(url);
     } catch (err) {
       lastErr = err;
-      const retriable = err.statusCode === undefined || err.statusCode === 429 || err.statusCode >= 500;
+      const status = (err as HttpError).statusCode;
+      const retriable = status === undefined || status === 429 || status >= 500;
       if (!retriable) throw err;
     }
   }
@@ -76,18 +91,26 @@ async function fetchWithRetry(url) {
 
 // Session-wide render cache: the API is idempotent (same LaTeX -> same SVG),
 // so every tool benefits, not just render_batch_cached.
-const renderCache = new Map(); // latex||format -> Buffer
+const renderCache = new Map<string, Buffer>(); // latex||format -> Buffer
 const RENDER_CACHE_MAX = 500;
 
 let lastRequestAt = 0;
 
-async function renderLatex(latex, format) {
+type RenderFormat = "svg" | "png";
+
+interface RenderResult {
+  data: Buffer;
+  url: string;
+  cached: boolean;
+}
+
+async function renderLatex(latex: string, format: RenderFormat | string): Promise<RenderResult> {
   const encoded = encodeURIComponent(latex);
   const url = UPMATH_BASE + "/" + format + "/" + encoded;
 
   const cacheKey = latex + "||" + format;
   if (renderCache.has(cacheKey)) {
-    return { data: renderCache.get(cacheKey), url, cached: true };
+    return { data: renderCache.get(cacheKey) as Buffer, url, cached: true };
   }
 
   if (url.length > MAX_URL_LENGTH) {
@@ -104,13 +127,17 @@ async function renderLatex(latex, format) {
 
   const data = await fetchWithRetry(url);
   if (renderCache.size >= RENDER_CACHE_MAX) {
-    renderCache.delete(renderCache.keys().next().value);
+    const oldest = renderCache.keys().next().value;
+    if (oldest !== undefined) renderCache.delete(oldest);
   }
   renderCache.set(cacheKey, data);
   return { data, url, cached: false };
 }
 
-const VERSION = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+// Injected by scripts/bundle.mjs at bundle time; absent when running from source.
+declare const __PKG_VERSION__: string | undefined;
+const VERSION: string =
+  typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
 const server = new McpServer({
   name: "upmath-mcp",
@@ -193,7 +220,7 @@ server.tool(
         ok++;
         results.push("  " + filename + " (" + result.data.length + " bytes)");
       } catch (err) {
-        results.push("  " + eq.name + ": ERROR - " + err.message);
+        results.push("  " + eq.name + ": ERROR - " + errMessage(err));
       }
     }
     return { content: [{ type: "text", text: "Rendered " + ok + "/" + equations.length + " equations to " + absDir + ":\n" + results.join("\n") }] };
@@ -215,7 +242,7 @@ server.tool(
         ? "Valid LaTeX. Rendered successfully (" + result.data.length + " bytes SVG)."
         : "Warning: rendered but produced minimal SVG. Check syntax." }] };
     } catch (err) {
-      return { content: [{ type: "text", text: "Invalid LaTeX: " + err.message }] };
+      return { content: [{ type: "text", text: "Invalid LaTeX: " + errMessage(err) }] };
     }
   }
 );
@@ -254,7 +281,7 @@ server.tool(
         const result = await renderLatex(match[1].trim(), "svg");
         parts.push({ type: "svg", content: result.data.toString("utf-8") });
       } catch (err) {
-        parts.push({ type: "error", content: "[Render error: " + err.message + "]" });
+        parts.push({ type: "error", content: "[Render error: " + errMessage(err) + "]" });
       }
       lastIndex = match.index + match[0].length;
     }
@@ -366,7 +393,7 @@ server.tool(
         html += convertLineToHtml(processed) + "\n";
       }
 
-      const fullHtml = buildHtmlPage(title || "Document", author, html, false);
+      const fullHtml = buildHtmlPage(title || "Document", author ?? "", html, false);
       fs.writeFileSync(absOutput, fullHtml, "utf-8");
       return { content: [{ type: "text", text: "Rendered " + mathCount + " equations via UpMath API. Saved to: " + absOutput + " (" + fullHtml.length + " bytes)" }] };
 
@@ -406,14 +433,14 @@ server.tool(
         html += convertLineToHtml(processed) + "\n";
       }
 
-      const fullHtml = buildHtmlPage(title || "Document", author, html, true);
+      const fullHtml = buildHtmlPage(title || "Document", author ?? "", html, true);
       fs.writeFileSync(absOutput, fullHtml, "utf-8");
       return { content: [{ type: "text", text: "Rendered with KaTeX (client-side). Saved to: " + absOutput + " (" + fullHtml.length + " bytes)" }] };
     }
   }
 );
 
-function convertLineToHtml(line) {
+function convertLineToHtml(line: string): string {
   const stripped = line.trim();
   if (!stripped) return "";
 
@@ -435,7 +462,7 @@ function convertLineToHtml(line) {
   // Table rows
   if (stripped.startsWith("|") && stripped.endsWith("|")) {
     if (/^\|[-:|]+\|$/.test(stripped)) return ""; // Separator row
-    const cells = stripped.split("|").filter(Boolean).map(c => "<td>" + processInline(c.trim()) + "</td>");
+    const cells = stripped.split("|").filter(Boolean).map((c: string) => "<td>" + processInline(c.trim()) + "</td>");
     return "<tr>" + cells.join("") + "</tr>";
   }
 
@@ -443,7 +470,7 @@ function convertLineToHtml(line) {
   return "<p>" + processInline(stripped) + "</p>";
 }
 
-function processInline(text) {
+function processInline(text: string): string {
   return text
     .replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>")
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
@@ -452,7 +479,12 @@ function processInline(text) {
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
 }
 
-function buildHtmlPage(title, author, body, useKatex) {
+function buildHtmlPage(
+  title: string,
+  author: string,
+  body: string,
+  useKatex: boolean,
+): string {
   const katexHead = useKatex ? `
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
@@ -583,12 +615,14 @@ server.tool(
     }
 
     // Sort symbols by frequency
-    const sortedSymbols = Object.entries(symbols)
+    const sortedSymbols = Object.entries(symbols as Record<string, number>)
       .sort((a, b) => b[1] - a[1])
       .map(([sym, count]) => ({ symbol: sym, count }));
 
     // Detect numbering gaps
-    const numberedEqs = equations.filter(e => e.number).map(e => e.number);
+    const numberedEqs = equations
+      .filter((e) => e.number)
+      .map((e) => e.number as string);
     const numberingIssues = detectNumberingGaps(numberedEqs);
 
     // Cross-reference check: find $$...ref... or (E.x) references in text
@@ -652,7 +686,7 @@ server.tool(
   }
 );
 
-function extractSymbols(latex, symbols) {
+function extractSymbols(latex: string, symbols: Record<string, number>): void {
   // Extract Greek letters, operators, and named functions
   const patterns = [
     /\\(alpha|beta|gamma|delta|epsilon|varepsilon|zeta|eta|theta|vartheta|iota|kappa|lambda|mu|nu|xi|pi|varpi|rho|varrho|sigma|varsigma|tau|upsilon|phi|varphi|chi|psi|omega)/g,
@@ -687,10 +721,10 @@ function extractSymbols(latex, symbols) {
   }
 }
 
-function detectNumberingGaps(numbers) {
-  const issues = [];
+function detectNumberingGaps(numbers: string[]): string[] {
+  const issues: string[] = [];
   // Group by prefix (e.g., "E.1", "1", "A.1")
-  const groups = {};
+  const groups: Record<string, string[]> = {};
   for (const num of numbers) {
     const parts = num.split(".");
     const prefix = parts.length > 1 ? parts[0] : "";
@@ -789,7 +823,17 @@ server.tool(
   }
 );
 
-function recordNotation(latex, line, section, notation) {
+interface NotationEntry {
+  firstLine: number;
+  section: string;
+}
+
+function recordNotation(
+  latex: string,
+  line: number,
+  section: string,
+  notation: Map<string, NotationEntry>,
+): void {
   // Greek letters
   const greekRe = /\\(alpha|beta|gamma|delta|epsilon|varepsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|pi|rho|sigma|tau|upsilon|phi|varphi|chi|psi|omega|Gamma|Delta|Theta|Lambda|Xi|Pi|Sigma|Upsilon|Phi|Psi|Omega)\b/g;
   for (const m of latex.matchAll(greekRe)) {
@@ -877,7 +921,7 @@ server.tool(
         }
       } catch (err) {
         errors++;
-        results.push({ line: eq.line, status: "error", issues: [err.message], latex: eq.latex.slice(0, 60) });
+        results.push({ line: eq.line, status: "error", issues: [errMessage(err)], latex: eq.latex.slice(0, 60) });
       }
     }
 
@@ -904,7 +948,7 @@ server.tool(
   }
 );
 
-function checkLocalSyntax(latex) {
+function checkLocalSyntax(latex: string): string[] {
   const issues = [];
   // Unmatched braces
   let depth = 0;
@@ -933,10 +977,20 @@ function checkLocalSyntax(latex) {
 // A. DIAGRAM TEMPLATES
 // ============================================================
 
-const DIAGRAM_TEMPLATES = {
+/** Parsed JSON supplied by the caller: values are strings, numbers or arrays. */
+type TemplateParams = Record<string, any>;
+
+interface DiagramTemplate {
+  description: string;
+  template: (params: TemplateParams) => string;
+}
+
+// Typed as a Record so a lookup by a runtime string is checked rather than
+// implicitly any -- the tool takes the template name from the caller.
+const DIAGRAM_TEMPLATES: Record<string, DiagramTemplate> = {
   "control-system": {
     description: "Feedback control system block diagram (reference, plant, controller, feedback)",
-    template: (params) => {
+    template: (params: TemplateParams) => {
       const { reference = "r(t)", output = "y(t)", controller = "C(s)", plant = "G(s)", feedback = "H(s)" } = params;
       return `\\usepackage{tikz}
 \\usetikzlibrary{positioning,arrows.meta}
@@ -959,7 +1013,7 @@ const DIAGRAM_TEMPLATES = {
   },
   "neural-network": {
     description: "Layered neural network diagram with configurable layers",
-    template: (params) => {
+    template: (params: TemplateParams) => {
       const { layers = [3, 4, 4, 2], labels = ["Input", "Hidden 1", "Hidden 2", "Output"] } = params;
       let code = `\\usepackage{tikz}
 \\begin{tikzpicture}[x=2.2cm,y=1.2cm,>=stealth]`;
@@ -984,7 +1038,7 @@ const DIAGRAM_TEMPLATES = {
   },
   "state-machine": {
     description: "Finite state machine / state transition diagram",
-    template: (params) => {
+    template: (params: TemplateParams) => {
       const { states = ["S0", "S1", "S2"], transitions = [["S0", "S1", "a"], ["S1", "S2", "b"], ["S2", "S0", "c"]], initial = "S0" } = params;
       let code = `\\usepackage{tikz}
 \\usetikzlibrary{automata,positioning,arrows.meta}
@@ -1010,7 +1064,7 @@ const DIAGRAM_TEMPLATES = {
   },
   "bayesian-network": {
     description: "Bayesian/probabilistic graphical model",
-    template: (params) => {
+    template: (params: TemplateParams) => {
       const { nodes = [["X", 0, 2], ["Y", -1, 0], ["Z", 1, 0]], edges = [["X", "Y"], ["X", "Z"]], observed = ["Z"] } = params;
       let code = `\\usepackage{tikz}
 \\begin{tikzpicture}[>=stealth,node distance=1.5cm,
@@ -1029,7 +1083,7 @@ const DIAGRAM_TEMPLATES = {
   },
   "signal-flow": {
     description: "Signal flow diagram (for control theory / DSP)",
-    template: (params) => {
+    template: (params: TemplateParams) => {
       const { nodes = ["x", "H_1", "H_2", "y"], connections = [["x", "H_1", ""], ["H_1", "H_2", ""], ["H_2", "y", ""]] } = params;
       let code = `\\usepackage{tikz}
 \\usetikzlibrary{positioning,arrows.meta}
@@ -1048,7 +1102,7 @@ const DIAGRAM_TEMPLATES = {
   },
   "data-plot": {
     description: "Publication-quality data plot using pgfplots",
-    template: (params) => {
+    template: (params: TemplateParams) => {
       const { xlabel = "x", ylabel = "y", title = "", xdata = "0,1,2,3,4,5", ydata = "0,1,4,9,16,25", style = "mark=*,blue" } = params;
       return `\\usepackage{pgfplots}
 \\pgfplotsset{compat=1.18}
@@ -1063,7 +1117,10 @@ const DIAGRAM_TEMPLATES = {
   label style={font=\\small},
 ]
 \\addplot[${style}] coordinates {
-  ${xdata.split(",").map((x, i) => "(" + x.trim() + "," + ydata.split(",")[i].trim() + ")").join(" ")}
+  ${xdata
+    .split(",")
+    .map((x: string, i: number) => "(" + x.trim() + "," + (ydata.split(",")[i] ?? "").trim() + ")")
+    .join(" ")}
 };
 \\end{axis}
 \\end{tikzpicture}`;
@@ -1071,7 +1128,7 @@ const DIAGRAM_TEMPLATES = {
   },
   "commutative-diagram": {
     description: "Commutative diagram (category theory / algebra)",
-    template: (params) => {
+    template: (params: TemplateParams) => {
       const { nodes = [["A", 0, 1], ["B", 2, 1], ["C", 0, -1], ["D", 2, -1]], arrows = [["A", "B", "f", "above"], ["A", "C", "g", "left"], ["B", "D", "h", "right"], ["C", "D", "k", "below"]] } = params;
       let code = `\\usepackage{tikz}
 \\usetikzlibrary{arrows.meta}
@@ -1121,10 +1178,10 @@ server.tool(
       try {
         params = JSON.parse(params);
       } catch (err) {
-        return { content: [{ type: "text", text: "Invalid params JSON: " + err.message }] };
+        return { content: [{ type: "text", text: "Invalid params JSON: " + errMessage(err) }] };
       }
     }
-    const tikzCode = tmpl.template(params);
+    const tikzCode = tmpl.template(params as TemplateParams);
     const result = await renderLatex(tikzCode, format);
 
     if (saveTo) {
@@ -1179,7 +1236,7 @@ server.tool(
         }
       } catch (err) {
         failed++;
-        results.push("  " + eq.name + ": ERROR - " + err.message);
+        results.push("  " + eq.name + ": ERROR - " + errMessage(err));
       }
     }
 
@@ -1201,12 +1258,12 @@ server.tool(
     try {
       beforeSvg = (await renderLatex(before, "svg")).data.toString("utf-8");
     } catch (err) {
-      beforeSvg = '<span style="color:red">Render error: ' + err.message + "</span>";
+      beforeSvg = '<span style="color:red">Render error: ' + errMessage(err) + "</span>";
     }
     try {
       afterSvg = (await renderLatex(after, "svg")).data.toString("utf-8");
     } catch (err) {
-      afterSvg = '<span style="color:red">Render error: ' + err.message + "</span>";
+      afterSvg = '<span style="color:red">Render error: ' + errMessage(err) + "</span>";
     }
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
@@ -1243,7 +1300,7 @@ server.tool(
   }
 );
 
-function escapeHtml(str) {
+function escapeHtml(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
@@ -1269,7 +1326,7 @@ server.tool(
       try {
         svg = (await renderLatex(latex, "svg")).data.toString("utf-8");
       } catch (err) {
-        svg = '<span style="color:red">Error: ' + err.message + "</span>";
+        svg = '<span style="color:red">Error: ' + errMessage(err) + "</span>";
       }
       cells.push({ value: val, svg, latex });
     }
@@ -1323,7 +1380,7 @@ server.tool(
       try {
         svg = (await renderLatex(eq.latex, "svg")).data.toString("utf-8");
       } catch (err) {
-        svg = '<span style="color:red">Error: ' + err.message + "</span>";
+        svg = '<span style="color:red">Error: ' + errMessage(err) + "</span>";
       }
       rows.push(`<tr>
         <td class="eq-name">${escapeHtml(eq.name)}</td>

@@ -20,6 +20,33 @@ All notable changes to the UpMath MCP server. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Migrated to TypeScript on Bun.** The 1373-line `server.js` becomes `src/index.ts`,
+  compiled by `tsc` to `dist/`. TypeScript 7.0.2, Bun 1.4.2, Node >= 24 runtime.
+  `bin` and `main` move to `dist/index.js`, and `prepublishOnly` builds it.
+
+  The conversion was driven by `tsc --strict` rather than a rewrite: 58 type errors,
+  fixed one class at a time, so behaviour is preserved by construction. What the type
+  checker actually found, beyond missing annotations: `parseInt(process.env[name])`
+  where the value can be `undefined`; a `renderCache.delete(keys().next().value)` that
+  is `undefined` on an empty map; `ydata.split(",")[i]` indexed without a bounds
+  check; and eleven `catch (err)` sites reading `.message` off an `unknown` throw,
+  which renders as "undefined" for anything that is not an `Error`.
+
+- **`scripts/bundle.mjs` now bundles `src/index.ts` directly.** esbuild compiles the
+  TypeScript itself, so bundling does not depend on `bun run build` having run first
+  -- one less ordering rule to get wrong.
+
+- **The smoke test moved to `scripts/smoke.mjs` and now drives the BUILT artifact**
+  (`dist/index.js`) instead of the source, so a packaging fault has somewhere to fail.
+  `bun run test` builds first, then runs it.
+
+- **CI no longer uses `--if-present` on every stage.** That flag succeeds silently
+  when a script is missing, so a renamed script yields a green run that checked
+  nothing. Bun also moves to 1.4.2 there, and the Node runtime smoke now imports
+  `./dist/index.js`.
+
 ### Security (2026-08-03)
 
 - `@hono/node-server` 1.19.x -> 2.0.12 (medium, needs 2.0.5), via
