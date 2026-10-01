@@ -20,6 +20,16 @@ All notable changes to the UpMath MCP server. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Removed the dead root `bun` Dependabot entry.** No dependency-update ecosystem works on a
+  Bun-managed root right now: `bun` fails with "Unsupported bun.lock 'lockfileVersion' 2" and `npm`
+  aborts during file fetching with "npm_and_yarn ecosystem cannot update bun.lock". Each error
+  recommends the other. Measured fleet-wide 2026-10-01: 19 dead updater jobs. The entry was failing
+  weekly and proposing nothing, so it was removed and the reason recorded in `dependabot.yml`.
+  Security alerts are unaffected; automated remediation is what stops. `github-actions` updates
+  continue.
+
 ### Changed
 
 - **Migrated to TypeScript on Bun.** The 1373-line `server.js` becomes `src/index.ts`,
